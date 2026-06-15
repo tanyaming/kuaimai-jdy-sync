@@ -11,6 +11,7 @@
     "sync:check": "tsx src/check.ts",
     "mysql2jiyun": "tsx src/mysql-to-jiyun.ts",
     "mysql2jiyun:once": "tsx src/mysql-to-jiyun.ts --once",
+    "mysql2jiyun:full": "tsx src/mysql-to-jiyun.ts --full",
     "test": "vitest run",
     "test:watch": "vitest"
   },
