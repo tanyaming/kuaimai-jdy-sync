@@ -26,7 +26,6 @@ CREATE TABLE IF NOT EXISTS `sync_state` (
 -- 2. 订单主表
 -- -------------------------------------------
 CREATE TABLE IF NOT EXISTS `kuaimai_order` (
-  `id`                BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT,
   `tid`               VARCHAR(64)      NOT NULL COMMENT '快麦主订单号',
   `sid`               VARCHAR(64)      DEFAULT NULL COMMENT '快麦系统订单ID',
   `source`            VARCHAR(32)      NOT NULL DEFAULT '' COMMENT '平台来源: fxg/kuaishou/taobao/jd/...',
@@ -70,8 +69,7 @@ CREATE TABLE IF NOT EXISTS `kuaimai_order` (
   `trade_tags`        JSON             DEFAULT NULL COMMENT '订单标签JSON',
   `raw_json`          JSON             DEFAULT NULL COMMENT '原始JSON(备用)',
   `synced_at`         DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '本记录同步时间',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_tid` (`tid`),
+  PRIMARY KEY (`tid`),
   KEY `idx_source` (`source`),
   KEY `idx_status` (`unified_status`),
   KEY `idx_pay_time` (`pay_time`),
@@ -85,7 +83,6 @@ CREATE TABLE IF NOT EXISTS `kuaimai_order` (
 -- 3. 订单明细表
 -- -------------------------------------------
 CREATE TABLE IF NOT EXISTS `kuaimai_order_item` (
-  `id`                  BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT,
   `tid`                 VARCHAR(64)      NOT NULL COMMENT '关联主订单号',
   `oid`                 VARCHAR(64)      NOT NULL COMMENT '快麦子订单号',
   `sid`                 VARCHAR(64)      DEFAULT NULL COMMENT '快麦系统订单ID',
@@ -121,8 +118,7 @@ CREATE TABLE IF NOT EXISTS `kuaimai_order_item` (
   `created_at`          DATETIME         DEFAULT NULL COMMENT '创建时间',
   `upd_time`            DATETIME         NOT NULL COMMENT '最后更新时间',
   `synced_at`           DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '本记录同步时间',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_oid` (`oid`),
+  PRIMARY KEY (`oid`),
   KEY `idx_tid` (`tid`),
   KEY `idx_outer_sku_id` (`outer_sku_id`),
   KEY `idx_sku_id` (`sku_id`),
