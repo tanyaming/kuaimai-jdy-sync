@@ -9,6 +9,8 @@
     "start": "node dist/index.js",
     "sync:once": "tsx src/sync-once.ts",
     "sync:check": "tsx src/check.ts",
+    "mysql2jiyun": "tsx src/mysql-to-jiyun.ts",
+    "mysql2jiyun:once": "tsx src/mysql-to-jiyun.ts --once",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -118,6 +118,8 @@ CREATE TABLE IF NOT EXISTS `kuaimai_order_item` (
   `created_at`          DATETIME         DEFAULT NULL COMMENT '创建时间',
   `upd_time`            DATETIME         NOT NULL COMMENT '最后更新时间',
   `synced_at`           DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '本记录同步时间',
+  `jiyun_data_id`       VARCHAR(64)      DEFAULT NULL COMMENT '简道云数据ID，NULL=未同步',
+  `jiyun_synced_at`     DATETIME         DEFAULT NULL COMMENT '同步到简道云的时间',
   PRIMARY KEY (`oid`),
   KEY `idx_tid` (`tid`),
   KEY `idx_outer_sku_id` (`outer_sku_id`),
@@ -127,3 +129,11 @@ CREATE TABLE IF NOT EXISTS `kuaimai_order_item` (
   KEY `idx_synced_at` (`synced_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='快麦订单明细表';
+
+-- -------------------------------------------
+-- 迁移：为已建表的数据库补充简道云同步字段
+-- 如果表已存在则执行以下语句
+-- -------------------------------------------
+ALTER TABLE `kuaimai_order_item`
+  ADD COLUMN IF NOT EXISTS `jiyun_data_id`   VARCHAR(64) DEFAULT NULL COMMENT '简道云数据ID，NULL=未同步',
+  ADD COLUMN IF NOT EXISTS `jiyun_synced_at` DATETIME   DEFAULT NULL COMMENT '同步到简道云的时间';

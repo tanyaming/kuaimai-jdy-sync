@@ -33,7 +33,6 @@ export function checkConfig(): string[] {
     { key: 'KUAIMAI_ACCESS_TOKEN', value: config.kuaimai.accessToken },
     { key: 'KUAIMAI_REFRESH_TOKEN', value: config.kuaimai.refreshToken },
     { key: 'JIYUN_API_KEY', value: config.jiyun.apiKey },
-    { key: 'JIYUN_API_SECRET', value: config.jiyun.apiSecret },
     { key: 'JIYUN_APP_ID', value: config.jiyun.appId },
     { key: 'JIYUN_ORDER_ENTRY_ID', value: config.jiyun.orderEntryId },
   ];

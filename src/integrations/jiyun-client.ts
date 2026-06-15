@@ -53,9 +53,7 @@ const client: AxiosInstance = axios.create({
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
-    Authorization: `Basic ${Buffer.from(
-      `${config.jiyun.apiKey}:${config.jiyun.apiSecret}`
-    ).toString('base64')}`,
+    Authorization: `Bearer ${config.jiyun.apiKey}`,
   },
 });
 
@@ -134,9 +132,9 @@ export async function createData(
     fieldData[key] = toJiyunValue(val);
   }
 
-  const path = `/api/v5/app/${config.jiyun.appId}/entry/${config.jiyun.orderEntryId}/data_create`;
+  const path = `/api/v4/app/${config.jiyun.appId}/entry/${config.jiyun.orderEntryId}/data_create`;
 
-  const result = await request<JiyunCreateResponse>(path, {
+  const result = await request<JiyunCreateResponse>('POST', path, {
     data: fieldData,
   });
 
@@ -157,9 +155,9 @@ export async function queryData(
   filter: Record<string, unknown>,
   limit: number = 10
 ): Promise<JiyunDataRow[]> {
-  const path = `/api/v5/app/${config.jiyun.appId}/entry/${config.jiyun.orderEntryId}/data_list`;
+  const path = `/api/v4/app/${config.jiyun.appId}/entry/${config.jiyun.orderEntryId}/data_list`;
 
-  const result = await request<JiyunListResponse>(path, {
+  const result = await request<JiyunListResponse>('POST', path, {
     filter,
     limit,
   });
@@ -220,9 +218,9 @@ export async function updateData(
     fieldData[key] = toJiyunValue(val);
   }
 
-  const path = `/api/v5/app/${config.jiyun.appId}/entry/${config.jiyun.orderEntryId}/data_update`;
+  const path = `/api/v4/app/${config.jiyun.appId}/entry/${config.jiyun.orderEntryId}/data_update`;
 
-  const result = await request<JiyunUpdateResponse>(path, {
+  const result = await request<JiyunUpdateResponse>('POST', path, {
     data_id: dataId,
     data: fieldData,
   });
