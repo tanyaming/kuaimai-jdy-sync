@@ -8,7 +8,7 @@
  */
 
 import { checkConfig, PAGE_SIZE, WRITE_DELAY, INTERVAL_MS, OVERLAP_MS } from './lib/config';
-import { fetchOrderPage, KuaimaiOrder, KuaimaiOrderItem } from './lib/kuaimai';
+import { fetchAllOrders, KuaimaiOrder, KuaimaiOrderItem } from './lib/kuaimai';
 import { batchFindByOids, createOne, updateOne } from './lib/jiyun';
 import { loadCursor, saveCursor } from './lib/cursor';
 import { mapItemToJiyun } from './lib/mapping';
@@ -18,6 +18,11 @@ function pad(n: number) { return String(n).padStart(2, '0'); }
 function formatDatetime(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
+
+const _log = console.log;
+const _error = console.error;
+console.log = (...args: any[]) => _log(`[${formatDatetime(new Date())}]`, ...args);
+console.error = (...args: any[]) => _error(`[${formatDatetime(new Date())}]`, ...args);
 
 function delay(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -88,25 +93,19 @@ async function fetchAndProcess(
   mode: 'create-only' | 'update-only',
 ): Promise<SyncResult> {
   const total: SyncResult = { written: 0, updated: 0, skipped: 0, failed: 0 };
-  let page = 1;
-  let fetched = 0;
 
-  while (true) {
-    const { orders, total: totalCount } = await fetchOrderPage(startTime, endTime, page, PAGE_SIZE, timeType);
-    if (orders.length === 0) break;
+  const orders = await fetchAllOrders(startTime, endTime, timeType);
+  if (orders.length === 0) return total;
 
-    fetched += orders.length;
-
-    const pageResult = await processPage(orders, mode);
+  // 按 PAGE_SIZE 分批处理（查重 + 写入）
+  for (let i = 0; i < orders.length; i += PAGE_SIZE) {
+    const batch = orders.slice(i, i + PAGE_SIZE);
+    const pageResult = await processPage(batch, mode);
     total.written += pageResult.written;
     total.updated += pageResult.updated;
     total.skipped += pageResult.skipped;
     total.failed += pageResult.failed;
-
-    console.log(`  [${timeType}] 第${page}页: ${orders.length} 个订单 (新增${total.written} 更新${total.updated} 失败${total.failed})`);
-
-    if (fetched >= totalCount) break;
-    page++;
+    console.log(`  [${timeType}] 批次 ${Math.floor(i / PAGE_SIZE) + 1}: ${batch.length} 个订单 (新增${total.written} 更新${total.updated} 失败${total.failed})`);
   }
 
   return total;

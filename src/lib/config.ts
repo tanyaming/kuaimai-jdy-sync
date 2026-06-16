@@ -1,7 +1,10 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-dotenv.config({ path: path.resolve(__dirname, '../..', '.env') });
+// 优先使用 DOTENV_PATH 环境变量，兼容 Docker 和本地开发
+dotenv.config({
+  path: process.env.DOTENV_PATH || path.resolve(__dirname, '../..', '.env'),
+});
 
 export const config = {
   kuaimai: {

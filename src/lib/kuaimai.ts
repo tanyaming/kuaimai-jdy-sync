@@ -134,15 +134,38 @@ export async function fetchAllOrders(
   timeType: 'created' | 'upd_time',
 ): Promise<KuaimaiOrder[]> {
   const all: KuaimaiOrder[] = [];
-  let page = 1;
 
-  while (true) {
-    const { orders, total } = await fetchOrderPage(startTime, endTime, page, PAGE_SIZE, timeType);
-    if (orders.length === 0) break;
-    all.push(...orders);
-    if (all.length >= total) break;
-    page++;
-    await new Promise(r => setTimeout(r, 150));
+  // 快麦 API 分页(page_no)不生效，改为按小时间窗口遍历
+  // 每10分钟一个窗口，确保每个窗口内数据量不超过单页上限
+  const windowMs = 10 * 60 * 1000; // 10 分钟
+  const start = new Date(startTime);
+  const end = new Date(endTime);
+
+  let cursor = new Date(start);
+  const seen = new Set<string>(); // 跨窗口去重（tid）
+  let totalAll = 0;
+
+  while (cursor < end) {
+    const windowEnd = new Date(Math.min(cursor.getTime() + windowMs, end.getTime()));
+
+    // page_size 设大一点（100），一个窗口内不太可能有超过 100 条
+    const { orders, total } = await fetchOrderPage(
+      formatDatetime(cursor),
+      formatDatetime(windowEnd),
+      1,
+      100,
+      timeType,
+    );
+
+    // 用 tid 去重
+    for (const o of orders) {
+      const tid = o.tid || '';
+      if (!tid || seen.has(tid)) continue;
+      seen.add(tid);
+      all.push(o);
+    }
+    totalAll += total;
+    cursor = windowEnd;
   }
 
   return all;

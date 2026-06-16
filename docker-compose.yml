@@ -1,0 +1,64 @@
+services:
+  # ── 定时同步服务（常驻，每5分钟执行一次）──
+  kuaimai-sync:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kuaimai-jdy-sync:latest
+    container_name: kuaimai-jdy-sync
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+      - DOTENV_PATH=/etc/kuaimai-sync/.env
+    env_file:
+      - .env.docker
+    volumes:
+      # 游标持久化：容器重建后从上次中断的位置继续
+      - sync-data:/app/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── 全量同步（一次性任务）──
+  # 用法: docker compose --profile full run --rm kuaimai-sync-full
+  kuaimai-sync-full:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kuaimai-jdy-sync:latest
+    container_name: kuaimai-jdy-sync-full
+    profiles:
+      - full
+    environment:
+      - TZ=Asia/Shanghai
+      - DOTENV_PATH=/etc/kuaimai-sync/.env
+    env_file:
+      - .env.docker
+    volumes:
+      - sync-data:/app/data
+    command: ["node", "dist/sync.js", "--full"]
+
+  # ── 单次增量同步（一次性任务）──
+  # 用法: docker compose --profile once run --rm kuaimai-sync-once
+  kuaimai-sync-once:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kuaimai-jdy-sync:latest
+    container_name: kuaimai-jdy-sync-once
+    profiles:
+      - once
+    environment:
+      - TZ=Asia/Shanghai
+      - DOTENV_PATH=/etc/kuaimai-sync/.env
+    env_file:
+      - .env.docker
+    volumes:
+      - sync-data:/app/data
+    command: ["node", "dist/sync.js", "--once"]
+
+volumes:
+  sync-data:
+    name: kuaimai-sync-data

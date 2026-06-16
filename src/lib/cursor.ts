@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
-const CURSOR_FILE = path.resolve(__dirname, '../..', 'data', 'sync-cursor.json');
+const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../..', 'data');
+const CURSOR_FILE = path.join(DATA_DIR, 'sync-cursor.json');
 
 export function loadCursor(): Date {
   try {
