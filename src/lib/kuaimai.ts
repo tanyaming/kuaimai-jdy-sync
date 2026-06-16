@@ -3,7 +3,7 @@ import axios, { AxiosInstance } from 'axios';
 import { config, PAGE_SIZE } from './config';
 
 export interface KuaimaiOrderItem {
-  oid: number;
+  oid: string;
   numIid?: string;
   outerSkuId?: string;
   skuId?: string;
@@ -81,6 +81,11 @@ const http: AxiosInstance = axios.create({
   baseURL: config.kuaimai.baseUrl,
   timeout: 30000,
   headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  transformResponse: [(data: string) => {
+    // 快麦 oid 超过 JS 安全整数范围，解析前转为字符串防止精度丢失
+    const safe = data.replace(/"oid"\s*:\s*(\d{16,})/g, '"oid":"$1"');
+    return JSON.parse(safe);
+  }],
 });
 
 async function request(bizParams: Record<string, string>): Promise<any> {

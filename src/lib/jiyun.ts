@@ -39,8 +39,9 @@ export async function batchFindByOids(oids: string[]): Promise<Map<string, strin
       for (const row of body.data || []) {
         if (row.oid) existing.set(row.oid, row._id);
       }
-    } catch {
-      // 查询失败不阻塞，后续走创建逻辑
+    } catch (err: any) {
+      const detail = err.response?.data ? JSON.stringify(err.response.data).substring(0, 300) : err.message;
+      console.error(`  [查重失败] ${detail}`);
     }
   }
 

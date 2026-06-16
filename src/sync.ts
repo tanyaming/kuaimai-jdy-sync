@@ -49,6 +49,7 @@ async function processPage(
   if (allOids.length === 0) return result;
 
   const existingMap = await batchFindByOids(allOids);
+  console.log(`    查重: ${allOids.length} 个oid, 已存在 ${existingMap.size} 个`);
 
   for (const oid of allOids) {
     const { order, item } = oidMap.get(oid)!;
