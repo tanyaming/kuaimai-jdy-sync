@@ -1,33 +1,22 @@
 {
   "name": "kuaimai-jdy-sync",
-  "version": "1.0.0",
-  "description": "快麦ERP → 简道云 订单数据同步中转服务",
-  "main": "dist/index.js",
+  "version": "2.0.0",
+  "description": "快麦ERP → 简道云 子订单同步服务",
+  "main": "dist/sync.js",
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "sync": "tsx src/sync.ts",
+    "sync:once": "tsx src/sync.ts --once",
+    "sync:full": "tsx src/sync.ts --full",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "sync:once": "tsx src/sync-once.ts",
-    "sync:check": "tsx src/check.ts",
-    "mysql2jiyun": "tsx src/mysql-to-jiyun.ts",
-    "mysql2jiyun:once": "tsx src/mysql-to-jiyun.ts --once",
-    "mysql2jiyun:full": "tsx src/mysql-to-jiyun.ts --full",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "start": "node dist/sync.js"
   },
   "dependencies": {
     "axios": "^1.7.0",
-    "cron": "^3.1.0",
-    "dotenv": "^16.4.0",
-    "mysql2": "^3.22.5",
-    "pino": "^9.0.0",
-    "pino-pretty": "^11.0.0",
-    "sql.js": "^1.14.1"
+    "dotenv": "^16.4.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "tsx": "^4.7.0",
-    "typescript": "^5.4.0",
-    "vitest": "^1.6.0"
+    "typescript": "^5.4.0"
   }
 }

@@ -20,7 +20,6 @@ KUAIMAI_BASE_URL=https://open.kuaimai.com/api
 
 # 简道云（从简道云开放平台获取）
 JIYUN_API_KEY=your_api_key
-JIYUN_API_SECRET=your_api_secret
 JIYUN_BASE_URL=https://api.jiandaoyun.com
 JIYUN_APP_ID=your_app_id
 JIYUN_ORDER_ENTRY_ID=your_order_entry_id
