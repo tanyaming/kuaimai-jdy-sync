@@ -116,12 +116,14 @@ async function sync(startTime: string, endTime: string): Promise<SyncResult> {
   console.log(`\n[同步] ${startTime} → ${endTime}`);
 
   // 第一趟：按创建时间拉新订单，只创建
+  // 使用当前实际时间作为 endTime，因为第一趟可能跑很久，期间有新订单产生
   console.log('  ── 第一趟：拉新订单（只创建）──');
-  const pass1 = await fetchAndProcess(startTime, endTime, 'created', 'create-only');
+  const pass1 = await fetchAndProcess(startTime, formatDatetime(new Date()), 'created', 'create-only');
 
   // 第二趟：按更新时间拉状态变更，只更新
+  // 同样使用当前实际时间，确保覆盖第一趟期间新产生的更新
   console.log('  ── 第二趟：拉状态变更（只更新）──');
-  const pass2 = await fetchAndProcess(startTime, endTime, 'upd_time', 'update-only');
+  const pass2 = await fetchAndProcess(startTime, formatDatetime(new Date()), 'upd_time', 'update-only');
 
   const result: SyncResult = {
     written: pass1.written + pass2.written,
