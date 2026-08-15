@@ -8,15 +8,21 @@
  */
 
 import { checkConfig, PAGE_SIZE, WRITE_DELAY, INTERVAL_MS, OVERLAP_MS } from './lib/config';
-import { fetchAllOrders, KuaimaiOrder, KuaimaiOrderItem } from './lib/kuaimai';
+import { fetchAllOrders, refreshSession, KuaimaiOrder, KuaimaiOrderItem } from './lib/kuaimai';
 import { batchFindByOids, createOne, updateOne } from './lib/jiyun';
 import { loadCursor, saveCursor } from './lib/cursor';
 import { mapItemToJiyun } from './lib/mapping';
 
 function pad(n: number) { return String(n).padStart(2, '0'); }
 
+/**
+ * 格式化为北京时间字符串（固定 UTC+8，不依赖容器时区）。
+ * 快麦 API 的 startTime/endTime 按北京时间解析，容器若为 UTC 时区
+ * 直接 getHours() 会偏差 8 小时，导致晚间订单漏拉。
+ */
 function formatDatetime(d: Date): string {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const bj = new Date(d.getTime() + 8 * 60 * 60 * 1000); // 转 UTC+8
+  return `${bj.getUTCFullYear()}-${pad(bj.getUTCMonth() + 1)}-${pad(bj.getUTCDate())} ${pad(bj.getUTCHours())}:${pad(bj.getUTCMinutes())}:${pad(bj.getUTCSeconds())}`;
 }
 
 const _log = console.log;
@@ -40,14 +46,36 @@ async function processPage(
   const result: SyncResult = { written: 0, updated: 0, skipped: 0, failed: 0 };
 
   const allOids: string[] = [];
-  const oidMap = new Map<string, { order: KuaimaiOrder; item: KuaimaiOrderItem }>();
+  const oidMap = new Map<string, { order: KuaimaiOrder; item: KuaimaiOrderItem; isPddSuit?: boolean }>();
 
   for (const order of orders) {
-    for (const item of order.orders || []) {
-      if (!item.oid) continue;
-      const oid = String(item.oid);
+    const isPdd = order.source === 'pdd';
+    if (isPdd) {
+      // 拼多多：每个 sid 只生成一条记录（不展开 suits）。平台订单号 API 不返回，金额用主单公式。
+      // 商品信息取第一个子单（若有 suits 则取首个 suit）作为代表。
+      const firstItem = order.orders && order.orders[0];
+      if (!firstItem) continue;
+      const repItem = firstItem.suits && firstItem.suits.length > 0
+        ? { ...firstItem, ...firstItem.suits[0] }
+        : firstItem;
+      const oid = `${order.sid}_${firstItem.id || ''}`;
       allOids.push(oid);
-      oidMap.set(oid, { order, item });
+      oidMap.set(oid, { order, item: repItem, isPddSuit: firstItem.suits && firstItem.suits.length > 0 });
+      continue;
+    }
+    for (const item of order.orders || []) {
+      // 去重键按平台区分：
+      // - 抖音/京东/快手/视频号：子单 oid 本身是唯一子单ID，直接用
+      // - 小红书/手动订单：oid 是商品ID或缺失/重复，必须用快麦子单 id（全局唯一流水号）
+      // - 平台拆出的手工单(isSplitOrder)：source 已归父平台，但 item.oid 在拆单场景会重复，仍用子单 id
+      const useItemId = order.source === 'xhs' || order.source === 'sys' || order.isSplitOrder;
+      const itemId = item.id !== undefined && item.id !== null ? String(item.id) : '';
+      const oid = useItemId
+        ? (itemId || String(item.oid || ''))
+        : String(item.oid || '');
+      if (!oid) continue;
+      allOids.push(oid);
+      oidMap.set(oid, { order, item, isPddSuit: false });
     }
   }
 
@@ -57,8 +85,8 @@ async function processPage(
   console.log(`    查重: ${allOids.length} 个oid, 已存在 ${existingMap.size} 个`);
 
   for (const oid of allOids) {
-    const { order, item } = oidMap.get(oid)!;
-    const row = mapItemToJiyun(order, item);
+    const entry = oidMap.get(oid)!;
+    const row = mapItemToJiyun(entry.order, entry.item, entry.isPddSuit);
     const existingId = existingMap.get(oid);
 
     if (existingId) {
@@ -89,7 +117,7 @@ async function processPage(
 async function fetchAndProcess(
   startTime: string,
   endTime: string,
-  timeType: 'created' | 'upd_time',
+  timeType: 'created' | 'upd_time' | 'pay_time',
   mode: 'create-only' | 'update-only',
 ): Promise<SyncResult> {
   const total: SyncResult = { written: 0, updated: 0, skipped: 0, failed: 0 };
@@ -115,9 +143,14 @@ async function sync(startTime: string, endTime: string): Promise<SyncResult> {
   const startWall = Date.now();
   console.log(`\n[同步] ${startTime} → ${endTime}`);
 
-  // 第一趟：按创建时间拉新订单，只创建
+  // 第一趟：按下单时间(created)拉新订单，只创建。
+  // 为什么用 created 而不是 pay_time：
+  //   - created 是所有订单必有、且下单即有的字段（已验证全部平台 created 都不缺失）；
+  //   - pay_time 会缺失（视频号/抖音存在未付款或延迟回填的单子，payTime=2000-01-01），
+  //     用 pay_time 做创建维度会永久漏掉这些单；
+  //   - 快麦后台对账按「下单时间」统计，与 created 口径一致。
   // 使用当前实际时间作为 endTime，因为第一趟可能跑很久，期间有新订单产生
-  console.log('  ── 第一趟：拉新订单（只创建）──');
+  console.log('  ── 第一趟：拉新订单（created，只创建）──');
   const pass1 = await fetchAndProcess(startTime, formatDatetime(new Date()), 'created', 'create-only');
 
   // 第二趟：按更新时间拉状态变更，只更新
@@ -176,6 +209,19 @@ async function main() {
     }
     process.exit(0);
   }
+
+  // ===== 快麦 Token 刷新（每天一次）=====
+  const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 小时
+
+  // 启动时刷新一次
+  await refreshSession();
+
+  // 每隔 24 小时刷新
+  setInterval(() => {
+    refreshSession().catch((err: any) => {
+      console.error(`[快麦刷新] 定时刷新异常: ${err.message}`);
+    });
+  }, REFRESH_INTERVAL_MS);
 
   // 定时模式
   console.log(`  间隔: ${INTERVAL_MS / 60000} 分钟`);

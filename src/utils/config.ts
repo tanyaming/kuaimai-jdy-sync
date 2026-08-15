@@ -1,10 +1,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-// 优先使用 DOTENV_PATH 环境变量，兼容 Docker 和本地开发
-dotenv.config({
-  path: process.env.DOTENV_PATH || path.resolve(__dirname, '../..', '.env'),
-});
+dotenv.config({ path: path.resolve(__dirname, '../..', '.env') });
 
 export const config = {
   kuaimai: {
@@ -18,23 +15,25 @@ export const config = {
     apiKey: process.env.JIYUN_API_KEY || '',
     baseUrl: process.env.JIYUN_BASE_URL || 'https://api.jiandaoyun.com',
     appId: process.env.JIYUN_APP_ID || '',
-    entryId: process.env.JIYUN_ORDER_ENTRY_ID || '',
+    orderEntryId: process.env.JIYUN_ORDER_ENTRY_ID || '',
+    costEntryId: process.env.JIYUN_COST_ENTRY_ID || '',
   },
-} as const;
-
-export const PAGE_SIZE = 100;
-export const WRITE_DELAY = 350;
-export const INTERVAL_MS = 5 * 60 * 1000;
-export const OVERLAP_MS = 2 * 60 * 1000;
+  sync: {
+    intervalMinutes: parseInt(process.env.SYNC_INTERVAL_MINUTES || '5', 10),
+    lookbackDays: parseInt(process.env.SYNC_LOOKBACK_DAYS || '1', 10),
+  },
+  logLevel: process.env.LOG_LEVEL || 'info',
+};
 
 export function checkConfig(): string[] {
-  const required: Array<{ key: string; value: string }> = [
+  const required: { key: string; value: string }[] = [
     { key: 'KUAIMAI_APP_KEY', value: config.kuaimai.appKey },
     { key: 'KUAIMAI_APP_SECRET', value: config.kuaimai.appSecret },
     { key: 'KUAIMAI_ACCESS_TOKEN', value: config.kuaimai.accessToken },
+    { key: 'KUAIMAI_REFRESH_TOKEN', value: config.kuaimai.refreshToken },
     { key: 'JIYUN_API_KEY', value: config.jiyun.apiKey },
     { key: 'JIYUN_APP_ID', value: config.jiyun.appId },
-    { key: 'JIYUN_ORDER_ENTRY_ID', value: config.jiyun.entryId },
+    { key: 'JIYUN_ORDER_ENTRY_ID', value: config.jiyun.orderEntryId },
   ];
-  return required.filter(r => !r.value).map(r => r.key);
+  return required.filter((r) => !r.value).map((r) => r.key);
 }
