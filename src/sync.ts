@@ -11,7 +11,14 @@ import { checkConfig, PAGE_SIZE, WRITE_DELAY, INTERVAL_MS, OVERLAP_MS } from './
 import { fetchAllOrders, refreshSession, KuaimaiOrder, KuaimaiOrderItem } from './lib/kuaimai';
 import { batchFindByOids, createOne, updateOne } from './lib/jiyun';
 import { loadCursor, saveCursor } from './lib/cursor';
+import { loadBackfillCursor, saveBackfillCursor } from './lib/backfillCursor';
 import { mapItemToJiyun } from './lib/mapping';
+
+// 补偿回看窗口（小时）：快麦对「京东自营」等订单的 created 存在延迟回填（可能延迟数小时到次日），
+// 增量 5 分钟窗口会错过这些单。补偿机制用 created 维度回看最近 N 小时补齐。
+const BACKFILL_WINDOW_HOURS = 24;
+// 补偿执行间隔（毫秒）：不必每轮都做全量回看，每 30 分钟跑一次即可。
+const BACKFILL_INTERVAL_MS = 30 * 60 * 1000;
 
 function pad(n: number) { return String(n).padStart(2, '0'); }
 
@@ -139,6 +146,33 @@ async function fetchAndProcess(
   return total;
 }
 
+/**
+ * 补偿同步：用 created 维度回看最近 BACKFILL_WINDOW_HOURS 小时，补齐延迟回填导致的漏单。
+ * 只创建不更新（create-only），已存在的订单通过查重自动跳过。
+ */
+async function backfillSync(): Promise<SyncResult> {
+  const now = new Date();
+  const start = new Date(now.getTime() - BACKFILL_WINDOW_HOURS * 60 * 60 * 1000);
+  console.log(`  ── 补偿回看：created ${BACKFILL_WINDOW_HOURS} 小时（${formatDatetime(start)} → ${formatDatetime(now)}）──`);
+  const total: SyncResult = { written: 0, updated: 0, skipped: 0, failed: 0 };
+
+  const orders = await fetchAllOrders(formatDatetime(start), formatDatetime(now), 'created');
+  if (orders.length === 0) {
+    console.log('    补偿：无订单');
+    return total;
+  }
+
+  for (let i = 0; i < orders.length; i += PAGE_SIZE) {
+    const batch = orders.slice(i, i + PAGE_SIZE);
+    const pageResult = await processPage(batch, 'create-only');
+    total.written += pageResult.written;
+    total.updated += pageResult.updated;
+    total.skipped += pageResult.skipped;
+    total.failed += pageResult.failed;
+  }
+  return total;
+}
+
 async function sync(startTime: string, endTime: string): Promise<SyncResult> {
   const startWall = Date.now();
   console.log(`\n[同步] ${startTime} → ${endTime}`);
@@ -229,6 +263,7 @@ async function main() {
   console.log('  按 Ctrl+C 退出\n');
 
   let running = false;
+  let lastBackfill = loadBackfillCursor();
 
   const tick = async () => {
     if (running) { console.log('[跳过] 上次同步未完成'); return; }
@@ -242,6 +277,14 @@ async function main() {
         saveCursor(now);
       } else {
         console.log(`  [警告] 本轮有 ${result.failed} 条失败，游标不推进，下轮重试`);
+      }
+
+      // 补偿回看：每 BACKFILL_INTERVAL_MS 执行一次，补齐 created 延迟回填导致的漏单
+      if (Date.now() - lastBackfill.getTime() >= BACKFILL_INTERVAL_MS) {
+        const bf = await backfillSync();
+        console.log(`  [补偿完成] 回看 ${BACKFILL_WINDOW_HOURS}h：新增 ${bf.written}, 跳过 ${bf.skipped}, 失败 ${bf.failed}`);
+        saveBackfillCursor(new Date());
+        lastBackfill = new Date();
       }
     } catch (err: any) {
       console.error(`[错误] ${err.message}`);
