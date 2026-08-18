@@ -126,7 +126,7 @@ export function mapItemToJiyun(order: KuaimaiOrder, item: KuaimaiOrderItem, isPd
     receiver_city: order.receiverCity || '',
     receiver_district: order.receiverDistrict || '',
     is_refund: order.isRefund || 0,
-    pay_time: msToDatetime(item.payTime) || msToDatetime(order.payTime) || msToDatetime(order.created),
+    pay_time: msToDatetime(item.payTime) || msToDatetime(order.payTime),
     consign_time: msToDatetime(item.consignTime) || msToDatetime(order.consignTime),
     end_time: msToDatetime(item.endTime) || msToDatetime(order.endTime),
     created_at: msToDatetime(order.created),

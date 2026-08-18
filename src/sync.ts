@@ -65,7 +65,10 @@ async function processPage(
       const repItem = firstItem.suits && firstItem.suits.length > 0
         ? { ...firstItem, ...firstItem.suits[0] }
         : firstItem;
-      const oid = `${order.sid}_${firstItem.id || ''}`;
+      // 关键：oid 去重键必须与 mapItemToJiyun 最终写入简道云的 oid 字段完全一致。
+      // mapItemToJiyun 对拼多多用 `item.id`（此处 item 即 repItem，有 suits 时 id 已指向 suits[0].id），
+      // 因此这里也必须用 repItem.id，而不能用 firstItem.id，否则查重键错位导致重复写入。
+      const oid = `${order.sid}_${repItem.id || ''}`;
       allOids.push(oid);
       oidMap.set(oid, { order, item: repItem, isPddSuit: firstItem.suits && firstItem.suits.length > 0 });
       continue;
@@ -147,13 +150,20 @@ async function fetchAndProcess(
 }
 
 /**
- * 补偿同步：用 created 维度回看最近 BACKFILL_WINDOW_HOURS 小时，补齐延迟回填导致的漏单。
- * 只创建不更新（create-only），已存在的订单通过查重自动跳过。
+ * 补偿同步：用 created 维度回看，补齐快麦「延迟回填 created」导致的漏单。
+ *
+ * 窗口起点取「上次补偿游标」与「now - BACKFILL_WINDOW_HOURS」中更早的那个：
+ *   - 首次启动（游标=0）或游标久远时，回看固定 BACKFILL_WINDOW_HOURS 小时，覆盖历史漏单；
+ *   - 正常运行后，每次补偿窗口随游标滑动，避免反复全量重扫同一批订单。
+ * 只创建不更新（create-only），已存在的订单通过查重（batchFindByOids 翻页查全）准确跳过，
+ * 从根源上杜绝重复写入。
  */
-async function backfillSync(): Promise<SyncResult> {
+async function backfillSync(since: Date): Promise<SyncResult> {
   const now = new Date();
-  const start = new Date(now.getTime() - BACKFILL_WINDOW_HOURS * 60 * 60 * 1000);
-  console.log(`  ── 补偿回看：created ${BACKFILL_WINDOW_HOURS} 小时（${formatDatetime(start)} → ${formatDatetime(now)}）──`);
+  const floor = new Date(now.getTime() - BACKFILL_WINDOW_HOURS * 60 * 60 * 1000);
+  // 窗口下界 = min(上次补偿游标, now - BACKFILL_WINDOW_HOURS)；顺便留 OVERLAP_MS 重叠防边界漏单
+  const start = new Date(Math.min(since.getTime(), floor.getTime()) - OVERLAP_MS);
+  console.log(`  ── 补偿回看：created（${formatDatetime(start)} → ${formatDatetime(now)}）──`);
   const total: SyncResult = { written: 0, updated: 0, skipped: 0, failed: 0 };
 
   const orders = await fetchAllOrders(formatDatetime(start), formatDatetime(now), 'created');
@@ -281,10 +291,15 @@ async function main() {
 
       // 补偿回看：每 BACKFILL_INTERVAL_MS 执行一次，补齐 created 延迟回填导致的漏单
       if (Date.now() - lastBackfill.getTime() >= BACKFILL_INTERVAL_MS) {
-        const bf = await backfillSync();
-        console.log(`  [补偿完成] 回看 ${BACKFILL_WINDOW_HOURS}h：新增 ${bf.written}, 跳过 ${bf.skipped}, 失败 ${bf.failed}`);
-        saveBackfillCursor(new Date());
-        lastBackfill = new Date();
+        const bf = await backfillSync(lastBackfill);
+        console.log(`  [补偿完成] 新增 ${bf.written}, 跳过 ${bf.skipped}, 失败 ${bf.failed}`);
+        if (bf.failed === 0) {
+          // 仅当补偿无失败时才推进补偿游标，避免失败导致后续漏补
+          saveBackfillCursor(new Date());
+          lastBackfill = new Date();
+        } else {
+          console.log(`  [警告] 补偿有 ${bf.failed} 条失败，补偿游标不推进，下轮重试`);
+        }
       }
     } catch (err: any) {
       console.error(`[错误] ${err.message}`);
