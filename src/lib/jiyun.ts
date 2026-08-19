@@ -99,3 +99,74 @@ export async function updateOne(dataId: string, data: Record<string, unknown>): 
     throw new Error(`简道云更新失败 [${body.code}]: ${body.msg}`);
   }
 }
+
+/**
+ * 按「主订单号 tid + 平台商品ID num_iid + SKU ID sku_id」定位子订单记录，
+ * 返回匹配记录的 _id。用于退款金额补偿（售后单无有效 sid，只能靠 tid + 商品维度定位）。
+ */
+export async function findDataIdByTidAndItem(
+  tid: string,
+  numIid: string,
+  skuId: string,
+): Promise<string | null> {
+  try {
+    const cond: Array<Record<string, unknown>> = [{ field: 'tid', method: 'eq', value: tid }];
+    if (numIid) cond.push({ field: 'num_iid', method: 'eq', value: numIid });
+    if (skuId) cond.push({ field: 'sku_id', method: 'eq', value: skuId });
+
+    const resp = await http.post('/api/v5/app/entry/data/list', {
+      app_id: config.jiyun.appId,
+      entry_id: config.jiyun.entryId,
+      limit: 100,
+      fields: ['_id', 'tid', 'num_iid', 'sku_id'],
+      filter: { rel: 'and', cond },
+    });
+    const body = resp.data as { data?: Array<{ _id: string }> };
+    const rows = body.data || [];
+    return rows.length > 0 ? rows[0]._id : null;
+  } catch (err: any) {
+    const detail = err.response?.data ? JSON.stringify(err.response.data).substring(0, 300) : err.message;
+    console.error(`  [退款反查失败] tid=${tid} numIid=${numIid} skuId=${skuId}: ${detail}`);
+    return null;
+  }
+}
+
+/**
+ * 仅更新单条记录的实际退款金额字段（tuikuanjine），不碰其他字段。
+ */
+export async function updateRefundAmount(dataId: string, refundMoney: number): Promise<void> {
+  await updateOne(dataId, { tuikuanjine: refundMoney });
+}
+
+/**
+ * 查简道云里 refund_status=SUCCESS 且 tuikuanjine 为空的子订单。
+ * 这是退款补偿的「逆向」驱动源：售后单接口时间过滤无效，
+ * 只能从简道云里找出已退款但还没补退款金额的订单，再逐个用 tid 查售后单。
+ * 返回每条记录的 { _id, tid, num_iid, sku_id }，用于后续精确查询售后单并回填退款金额。
+ */
+export async function findRefundedOrdersWithoutAmount(
+  limit = 200,
+): Promise<Array<{ _id: string; tid: string; num_iid: string; sku_id: string }>> {
+  try {
+    const resp = await http.post('/api/v5/app/entry/data/list', {
+      app_id: config.jiyun.appId,
+      entry_id: config.jiyun.entryId,
+      limit,
+      fields: ['_id', 'tid', 'num_iid', 'sku_id', 'tuikuanjine'],
+      filter: {
+        rel: 'and',
+        cond: [{ field: 'refund_status', method: 'eq', value: 'SUCCESS' }],
+      },
+    });
+    const body = resp.data as { data?: Array<{ _id: string; tid: string; num_iid: string; sku_id: string; tuikuanjine?: unknown }> };
+    const rows = (body.data || []).filter((r) => {
+      const v = r.tuikuanjine;
+      return v === undefined || v === null || v === '' || Number(v) === 0;
+    });
+    return rows.map((r) => ({ _id: r._id, tid: r.tid || '', num_iid: r.num_iid || '', sku_id: r.sku_id || '' }));
+  } catch (err: any) {
+    const detail = err.response?.data ? JSON.stringify(err.response.data).substring(0, 300) : err.message;
+    console.error(`  [查退款单失败] ${detail}`);
+    return [];
+  }
+}

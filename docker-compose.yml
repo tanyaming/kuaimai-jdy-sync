@@ -59,6 +59,24 @@ services:
       - sync-data:/app/data
     command: ["node", "dist/sync.js", "--once"]
 
+  # ── 退款金额补偿服务（常驻，每 30 分钟跑一次）──
+  # 售后单退款是滞后的，需周期扫描快麦售后单，把实际退款金额写回简道云
+  kuaimai-refund:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kuaimai-jdy-sync:latest
+    container_name: kuaimai-jdy-refund
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+      - DOTENV_PATH=/etc/kuaimai-sync/.env
+    env_file:
+      - .env.docker
+    volumes:
+      - sync-data:/app/data
+    command: ["node", "dist/backfillRefund.js"]
+
 volumes:
   sync-data:
     name: kuaimai-sync-data

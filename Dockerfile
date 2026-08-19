@@ -28,4 +28,5 @@ RUN mkdir -p /app/data
 ENV NODE_ENV=production
 ENV DOTENV_PATH=/app/.env
 
-ENTRYPOINT ["node", "dist/sync.js"]
+# 默认跑同步主服务；退款补偿等服务通过 command 覆盖（见 docker-compose）
+CMD ["node", "dist/sync.js"]

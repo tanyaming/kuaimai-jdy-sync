@@ -7,6 +7,8 @@
     "sync": "tsx src/sync.ts",
     "sync:once": "tsx src/sync.ts --once",
     "sync:full": "tsx src/sync.ts --full",
+    "refund": "tsx src/backfillRefund.ts",
+    "refund:once": "tsx src/backfillRefund.ts --once",
     "build": "tsc",
     "start": "node dist/sync.js"
   },

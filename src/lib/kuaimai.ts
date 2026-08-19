@@ -97,10 +97,10 @@ const http: AxiosInstance = axios.create({
   }],
 });
 
-async function request(bizParams: Record<string, string>): Promise<any> {
+async function request(bizParams: Record<string, string>, method = 'erp.trade.list.query'): Promise<any> {
   const params: Record<string, string> = {
     appKey: config.kuaimai.appKey,
-    method: 'erp.trade.list.query',
+    method,
     timestamp: formatDatetime(new Date()),
     version: '1.0',
     session: config.kuaimai.accessToken,
@@ -249,4 +249,52 @@ function resolveSplitSource(orders: KuaimaiOrder[]): void {
       o.isSplitOrder = true;
     }
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 售后单（退款）查询
+// 文档：erp.aftersale.list.query
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface KuaimaiAftersaleItem {
+  numIid?: string;      // 平台商品ID（与订单接口的 numIid 一致，用于关联子单）
+  skuId?: string;       // 快麦系统 SKU ID（与订单接口的 skuId 一致）
+  refundMoney?: string; // 该商品实际退款金额（字符串，需转数值）
+  price?: number | string;
+  goodItemCount?: number;
+  title?: string;
+  tid?: string;
+  id?: number | string;
+  sysItemId?: number;
+  skuId_alt?: string;
+}
+
+export interface KuaimaiAftersale {
+  id?: number | string;
+  tid?: string;          // 主订单号（关联订单的主 tid）
+  refundMoney?: number;  // 整笔售后退款总额
+  onlineStatusText?: string; // 售后状态文本（如「退款成功」）
+  onlineStatus?: number;
+  afterSaleType?: number;
+  source?: string;       // 平台（fxg=抖音）
+  shopName?: string;
+  items?: KuaimaiAftersaleItem[];
+  created?: number;      // 售后单创建时间（毫秒时间戳）
+  modified?: number;
+  sid?: number;          // 注意：接口返回 sid=-1，无效
+}
+
+/**
+ * 按主订单号 tid 精确查询售后单（返回该订单的全部售后记录）。
+ * 售后单接口的时间过滤（startTime/endTime/timeType）实测无效，
+ * 只能按 tid 精确查询（或拉全量列表后再过滤）。
+ * 因此退款补偿采用「从简道云找 refund_status=SUCCESS 的订单 → 逐个用 tid 查售后单」的逆向策略。
+ */
+export async function fetchAftersaleByTid(tid: string): Promise<KuaimaiAftersale[]> {
+  if (!tid) return [];
+  const result = await request(
+    { tid, pageNo: '1', pageSize: '20' },
+    'erp.aftersale.list.query',
+  );
+  return (result.list || []) as KuaimaiAftersale[];
 }
