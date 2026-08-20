@@ -142,31 +142,52 @@ export async function updateRefundAmount(dataId: string, refundMoney: number): P
  * 查简道云里 refund_status=SUCCESS 且 tuikuanjine 为空的子订单。
  * 这是退款补偿的「逆向」驱动源：售后单接口时间过滤无效，
  * 只能从简道云里找出已退款但还没补退款金额的订单，再逐个用 tid 查售后单。
- * 返回每条记录的 { _id, tid, num_iid, sku_id }，用于后续精确查询售后单并回填退款金额。
+ * 返回每条记录的 { _id, tid, num_iid, sku_id, source }，用于后续精确查询售后单并回填退款金额。
+ *
+ * 注意：历史 bug——仅取前 limit 条且无翻页，导致 refund_status=SUCCESS 总数超过 limit 时，
+ * 排在 limit 之后的最新退款单永远扫不到、金额永远补不上。这里改为 skip 游标循环翻页捞全。
  */
+export interface RefundedOrderRow {
+  _id: string;
+  tid: string;
+  num_iid: string;
+  sku_id: string;
+  source: string;
+  status: string;
+}
+
 export async function findRefundedOrdersWithoutAmount(
-  limit = 200,
-): Promise<Array<{ _id: string; tid: string; num_iid: string; sku_id: string }>> {
+  limit = 0, // 0 = 不截断，捞全所有 SUCCESS 且空金额的订单
+): Promise<RefundedOrderRow[]> {
+  const PAGE = 1000; // 单页拉取上限，循环翻页直到取完
+  const result: RefundedOrderRow[] = [];
   try {
-    const resp = await http.post('/api/v5/app/entry/data/list', {
-      app_id: config.jiyun.appId,
-      entry_id: config.jiyun.entryId,
-      limit,
-      fields: ['_id', 'tid', 'num_iid', 'sku_id', 'tuikuanjine'],
-      filter: {
-        rel: 'and',
-        cond: [{ field: 'refund_status', method: 'eq', value: 'SUCCESS' }],
-      },
-    });
-    const body = resp.data as { data?: Array<{ _id: string; tid: string; num_iid: string; sku_id: string; tuikuanjine?: unknown }> };
-    const rows = (body.data || []).filter((r) => {
-      const v = r.tuikuanjine;
-      return v === undefined || v === null || v === '' || Number(v) === 0;
-    });
-    return rows.map((r) => ({ _id: r._id, tid: r.tid || '', num_iid: r.num_iid || '', sku_id: r.sku_id || '' }));
+    let skip = 0;
+    while (true) {
+      const resp = await http.post('/api/v5/app/entry/data/list', {
+        app_id: config.jiyun.appId,
+        entry_id: config.jiyun.entryId,
+        limit: PAGE,
+        skip,
+        fields: ['_id', 'tid', 'num_iid', 'sku_id', 'tuikuanjine', 'source', 'status'],
+        filter: {
+          rel: 'and',
+          cond: [{ field: 'refund_status', method: 'eq', value: 'SUCCESS' }],
+        },
+      });
+      const body = resp.data as { data?: Array<{ _id: string; tid: string; num_iid: string; sku_id: string; tuikuanjine?: unknown; source?: string; status?: string }> };
+      const rows = (body.data || []).filter((r) => {
+        const v = r.tuikuanjine;
+        return v === undefined || v === null || v === '' || Number(v) === 0;
+      });
+      result.push(...rows.map((r) => ({ _id: r._id, tid: r.tid || '', num_iid: r.num_iid || '', sku_id: r.sku_id || '', source: r.source || '', status: r.status || '' })));
+      if ((body.data || []).length < PAGE) break;
+      skip += PAGE;
+    }
   } catch (err: any) {
     const detail = err.response?.data ? JSON.stringify(err.response.data).substring(0, 300) : err.message;
     console.error(`  [查退款单失败] ${detail}`);
-    return [];
   }
+  // limit > 0 时作为每轮处理上限（保护）；默认 0 = 不截断，捞全所有空金额订单
+  return limit > 0 ? result.slice(0, limit) : result;
 }

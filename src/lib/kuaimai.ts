@@ -298,3 +298,16 @@ export async function fetchAftersaleByTid(tid: string): Promise<KuaimaiAftersale
   );
   return (result.list || []) as KuaimaiAftersale[];
 }
+
+/**
+ * 按主订单号 tid 精确查询订单（返回单条或空）。
+ * 用于退款补偿里两处：
+ *  1. 小红书退款金额只能从订单接口的 orders[].suits[].discountFee（负数）取，售后单接口查不到小红书；
+ *  2. 判定「假退款」脏数据——订单接口 refundStatus=NO_REFUND 或 isRefund=0 说明实际未退款。
+ */
+export async function fetchOrderByTid(tid: string): Promise<KuaimaiOrder | null> {
+  if (!tid) return null;
+  const result = await request({ tid, pageNo: '1', pageSize: '5' });
+  const list = (result.list || []) as KuaimaiOrder[];
+  return list.length > 0 ? list[0] : null;
+}

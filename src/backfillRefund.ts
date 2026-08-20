@@ -16,15 +16,15 @@
  *   tsx src/backfillRefund.ts             # 定时模式：每 30 分钟跑一次
  */
 import { config, checkConfig, WRITE_DELAY } from './lib/config';
-import { fetchAftersaleByTid, KuaimaiAftersale } from './lib/kuaimai';
-import { findRefundedOrdersWithoutAmount, updateRefundAmount } from './lib/jiyun';
+import { fetchAftersaleByTid, fetchOrderByTid, KuaimaiAftersale } from './lib/kuaimai';
+import { findRefundedOrdersWithoutAmount, updateRefundAmount, updateOne } from './lib/jiyun';
 
 // 定时执行间隔（毫秒）：30 分钟
 const REFUND_INTERVAL_MS = 30 * 60 * 1000;
-// 每轮最多处理的订单数（防止一轮跑太久）
-// 注：退款补偿常驻服务每 30 分钟跑一轮，200 条/轮足够日常增量；
-// 首次补数据或需要全量补录时，可临时调大或用 --once 反复跑。
-const BATCH_LIMIT = 2000;
+// 每轮最多处理的订单数（防止一轮跑太久）。0 = 不限制，捞全所有待补订单。
+// findRefundedOrdersWithoutAmount 内部已用 skip 翻页捞全 SUCCESS 空金额订单，
+// 这里 BATCH_LIMIT 仅为保护上限（传 0 表示全量处理，用于 --once 首次补录）。
+const BATCH_LIMIT = 0;
 
 function pad(n: number) { return String(n).padStart(2, '0'); }
 
@@ -69,47 +69,83 @@ function extractRefundForItem(a: KuaimaiAftersale, numIid: string, skuId: string
 
 /**
  * 处理简道云中一条「已退款但空金额」的子订单：
- * 用 tid 查售后单，拿到该商品(numIid+skuId)的实际退款金额，写回 tuikuanjine。
+ * 按照平台拿到该商品的实际退款金额，写回 tuikuanjine；
+ * 若判定为「假退款」（refund_status 被误标 SUCCESS，实际未退款），则把 refund_status 改回 NO_REFUND。
+ *
+ * 平台差异（关键）：
+ *  - 抖音/快手/视频号/京东：售后单接口 erp.aftersale.list.query 按 tid 可精确查到 refundMoney。
+ *  - 小红书：售后单接口查不到（tid/oid/id/sid 全部命中不了），退款金额只能取订单接口的
+ *    orders[].suits[].discountFee（负数，如 -19.8 表示实际退 19.8 元）。
+ *  - 脏数据：订单接口 refundStatus=NO_REFUND 或顶层 isRefund=0，说明实际未退款，应改 refund_status。
  */
 async function processOneRefund(
-  row: { _id: string; tid: string; num_iid: string; sku_id: string },
-): Promise<'updated' | 'skipped' | 'failed'> {
-  const { _id, tid, num_iid, sku_id } = row;
+  row: { _id: string; tid: string; num_iid: string; sku_id: string; source: string; status: string },
+): Promise<'updated' | 'set_norefund' | 'skipped' | 'failed'> {
+  const { _id, tid, num_iid, sku_id, source } = row;
   if (!tid) return 'skipped';
 
-  const aftersales = await fetchAftersaleByTid(tid);
-  if (!aftersales.length) return 'skipped'; // 无售后单（可能是 refund_status 脏数据）
-
-  // 找「退款成功」的售后记录
-  const refundRecords = aftersales.filter((a) => a.onlineStatusText === '退款成功' || a.onlineStatus === 7);
-  const target = refundRecords.length > 0 ? refundRecords[0] : aftersales[0];
-
-  const refundMoney = extractRefundForItem(target, num_iid, sku_id);
-  if (refundMoney <= 0) return 'skipped';
-
   try {
-    await updateRefundAmount(_id, refundMoney);
-    return 'updated';
+    // 一、小红书：退款金额只从订单接口 suits[].discountFee 取
+    if (source === '小红书') {
+      const order = await fetchOrderByTid(tid);
+      if (!order || !order.orders || !order.orders.length) return 'skipped';
+      const sub = order.orders[0];
+      const suit = sub.suits && sub.suits.length ? sub.suits[0] : null;
+      const df = suit ? suit.discountFee : null;
+      const dfNum = df === null || df === undefined || df === '' ? 0 : Number(df);
+      if (dfNum < 0) {
+        // 真退款：discountFee 为负数，退款金额 = 绝对值
+        await updateRefundAmount(_id, Math.abs(dfNum));
+        return 'updated';
+      }
+      // 无负 discountFee → 未退款（或退款又取消），refund_status 是脏数据
+      await updateOne(_id, { refund_status: 'NO_REFUND' });
+      return 'set_norefund';
+    }
+
+    // 二、其他平台：售后单接口按 tid 查退款金额
+    const aftersales = await fetchAftersaleByTid(tid);
+    const refundRecords = aftersales.filter((a) => a.onlineStatusText === '退款成功' || a.onlineStatus === 7);
+    if (refundRecords.length > 0) {
+      const target = refundRecords[0];
+      const refundMoney = extractRefundForItem(target, num_iid, sku_id);
+      if (refundMoney > 0) {
+        await updateRefundAmount(_id, refundMoney);
+        return 'updated';
+      }
+      return 'skipped'; // 有售后单但金额为 0（极少见）
+    }
+
+    // 三、无售后单 → 用订单接口判定是否「假退款」脏数据
+    const order = await fetchOrderByTid(tid);
+    const rs = order && order.orders && order.orders[0] ? order.orders[0].refundStatus : undefined;
+    const isRefund = order ? order.isRefund : undefined;
+    if (rs === 'NO_REFUND' || isRefund === 0) {
+      await updateOne(_id, { refund_status: 'NO_REFUND' });
+      return 'set_norefund';
+    }
+    return 'skipped'; // 无售后单、订单也未明确 NO_REFUND，保留原样（需人工确认）
   } catch (err: any) {
     console.error(`  [写入失败] tid=${tid} dataId=${_id}: ${err.message?.substring(0, 200)}`);
     return 'failed';
   }
 }
 
-async function runOnce(): Promise<{ updated: number; skipped: number; failed: number; total: number }> {
+async function runOnce(): Promise<{ updated: number; set_norefund: number; skipped: number; failed: number; total: number }> {
   console.log('\n[退款补偿] 扫描简道云 refund_status=SUCCESS 且空金额的订单...');
   const rows = await findRefundedOrdersWithoutAmount(BATCH_LIMIT);
   console.log(`  待处理 ${rows.length} 条`);
 
-  const agg = { updated: 0, skipped: 0, failed: 0 };
+  const agg = { updated: 0, set_norefund: 0, skipped: 0, failed: 0 };
   for (const row of rows) {
     const r = await processOneRefund(row);
     if (r === 'updated') agg.updated++;
+    else if (r === 'set_norefund') agg.set_norefund++;
     else if (r === 'failed') agg.failed++;
     else agg.skipped++;
     await delay(WRITE_DELAY);
   }
-  console.log(`[退款补偿完成] 更新 ${agg.updated}, 跳过 ${agg.skipped}, 失败 ${agg.failed}`);
+  console.log(`[退款补偿完成] 补金额 ${agg.updated}, 改NO_REFUND ${agg.set_norefund}, 跳过 ${agg.skipped}, 失败 ${agg.failed}`);
   return { ...agg, total: rows.length };
 }
 
