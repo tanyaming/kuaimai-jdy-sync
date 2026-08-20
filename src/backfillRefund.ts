@@ -16,7 +16,7 @@
  *   tsx src/backfillRefund.ts             # 定时模式：每 30 分钟跑一次
  */
 import { config, checkConfig, WRITE_DELAY } from './lib/config';
-import { fetchAftersaleByTid, fetchOrderByTid, KuaimaiAftersale } from './lib/kuaimai';
+import { fetchAftersaleByTid, fetchOrderByTid, refreshSession, KuaimaiAftersale } from './lib/kuaimai';
 import { findRefundedOrdersWithoutAmount, updateRefundAmount, updateOne } from './lib/jiyun';
 
 // 定时执行间隔（毫秒）：30 分钟
@@ -167,6 +167,21 @@ async function main() {
     await runOnce();
     process.exit(0);
   }
+
+  // ===== 快麦 Token 刷新（每天一次）=====
+  // 退款补偿服务也调快麦 API，必须独立刷新会话（不能依赖主同步服务），
+  // 否则主同步停了 30 天后，accessToken 过期会导致退款补偿 403。
+  const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 小时
+
+  // 启动时刷新一次
+  await refreshSession();
+
+  // 每隔 24 小时刷新
+  setInterval(() => {
+    refreshSession().catch((err: any) => {
+      console.error(`[快麦刷新] 定时刷新异常: ${err.message}`);
+    });
+  }, REFRESH_INTERVAL_MS);
 
   // 定时模式：每 30 分钟跑一次
   console.log(`  间隔: ${REFUND_INTERVAL_MS / 60000} 分钟`);
